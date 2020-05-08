@@ -1,4 +1,4 @@
-# 3D Reconstruction with F matrix.
+# 3D Reconstruction with F and K or Q.
 
 
 Optical Left |  Optical Right
