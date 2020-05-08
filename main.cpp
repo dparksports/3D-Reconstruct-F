@@ -29,6 +29,22 @@
 using namespace cv;
 using namespace std;
 
+static void saveXYZ(const char* filename, const Mat& mat)
+{
+    const double max_z = 1.0e4;
+    FILE* fp = fopen(filename, "wt");
+    for(int y = 0; y < mat.rows; y++)
+    {
+        for(int x = 0; x < mat.cols; x++)
+        {
+            Vec3f point = mat.at<Vec3f>(y, x);
+            if(fabs(point[2] - max_z) < FLT_EPSILON || fabs(point[2]) > max_z) continue;
+            fprintf(fp, "%f %f %f\n", point[0], point[1], point[2]);
+        }
+    }
+    fclose(fp);
+}
+
 string type2str(int type) {
     string r;
 
@@ -101,7 +117,7 @@ int main() {
     cv::cvtColor(combinedSrc, combinedSrc, cv::COLOR_GRAY2RGB);
     printRow("combinedSrc", combinedSrc);
 
-    std::vector<cv::KeyPoint> sourceKeypoints, destinationKeypoints;
+    std::vector<cv::Point2f> sourceKeypoints, destinationKeypoints;
 
     std::stringstream ss;
     ss << "\nMatches:";
@@ -110,8 +126,8 @@ int main() {
         cv::KeyPoint k1 = keypoints1[goodMatch.queryIdx];
         cv::KeyPoint k2 = keypoints2[goodMatch.trainIdx];
 
-        sourceKeypoints.push_back(k1);
-        destinationKeypoints.push_back(k1);
+        sourceKeypoints.push_back(k1.pt);
+        destinationKeypoints.push_back(k2.pt);
 
         int xOffset = img1.cols;
         cv::line(combinedSrc, k1.pt,
@@ -121,22 +137,30 @@ int main() {
            << " distance:" << goodMatch.distance;
     }
 
-    std::cout << ss.str() << std::endl;
+//    std::cout << ss.str() << std::endl;
     std::cout << "goodMatches.size():" << goodMatches.size() << std::endl;
     string combinedPath = "matched.png";
     cv::imwrite(combinedPath, combinedSrc);
     printRow("combinedSrc", combinedSrc);
 
+    // collect samples with (1 - p)^e
+    std::vector<cv::Point2f> pointsTranslateA, pointsTranslateB;
+    for (const auto& match: goodMatches) {
+        pointsTranslateA.emplace_back(keypoints1[match.queryIdx].pt);
+        pointsTranslateB.emplace_back(keypoints2[match.trainIdx].pt);
+    }
 
-//    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints,
-//            FM_RANSAC, 3, 0.99);
+    cv::Mat matrixF = cv::findFundamentalMat(pointsTranslateA, pointsTranslateB,
+            FM_RANSAC, 3, 0.99);
 //    std::vector<uint8_t> inliersMask(goodMatches.size());
 //    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints, inliersMask);
-    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints, FM_8POINT);
+//    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints, FM_8POINT);
 
     cv::Mat H1(4,4, img1.type());
-    cv::Mat H2(4,4, img1.type());
-    cv::stereoRectifyUncalibrated(img1, img2, matrixF, img1.size(), H1, H2);
+    cv::Mat H2(4,4, img2.type());
+    cv::stereoRectifyUncalibrated(sourceKeypoints, destinationKeypoints, matrixF, img1.size(), H1, H2);
+    print("H1", H1);
+    print("H2", H2);
 
     cv::Mat rectified1(img1.size(), img1.type());
     cv::warpPerspective(img1, rectified1, H1, img1.size());
@@ -145,4 +169,57 @@ int main() {
     cv::Mat rectified2(img2.size(), img2.type());
     cv::warpPerspective(img2, rectified2, H2, img2.size());
     cv::imwrite("rectified2.png", rectified2);
+
+    printRow("rectified1", rectified1);
+    printRow("rectified2", rectified2);
+
+    Ptr<StereoSGBM> sgbm = StereoSGBM::create(0,16,3);
+    int sgbmWinSize = 3;
+
+    int cn = img1.channels();
+    int minDisparity = 16;
+    int numberOfDisparities = 112 - minDisparity;
+
+    sgbm->setMinDisparity(minDisparity);
+    sgbm->setNumDisparities(numberOfDisparities);
+    sgbm->setBlockSize(sgbmWinSize);
+    sgbm->setUniquenessRatio(10);
+    sgbm->setSpeckleWindowSize(100);
+    sgbm->setSpeckleRange(32);
+    sgbm->setDisp12MaxDiff(1);
+
+    sgbm->setP1(8*cn*sgbmWinSize*sgbmWinSize);
+    sgbm->setP2(32*cn*sgbmWinSize*sgbmWinSize);
+    sgbm->setPreFilterCap(20);
+//    sgbm->setMode(false);
+
+    cv::Mat disp, disp8;
+    float disparity_multiplier = 1.0f;
+    sgbm->compute(img1, img2, disp);
+    if (disp.type() == CV_16S)
+        disparity_multiplier = 16.0f;
+    disp.convertTo(disp8, CV_8U, 255/(numberOfDisparities*16.));
+    namedWindow("disparity", 0);
+    imshow("disparity", disp8);
+
+    Size img_size = img1.size();
+    float w = img_size.width;
+    float h = img_size.height;
+    float focal_length = 10;
+
+    cv::Mat Q = (Mat_<float>(4,4) <<
+            1, 0, 0, w / 2.0,
+            0, -1, 0, h / 2.0,
+            0, 0, focal_length, 0,
+            0, 0, 0, 1);
+    print("Q", Q);
+
+    Mat xyz;
+    Mat floatDisp;
+    disp.convertTo(floatDisp, CV_32F, 1.0f / disparity_multiplier);
+    reprojectImageTo3D(, xyz, Q, true);
+//    cv::cvtColor(img1, img1, cv::COLOR_GRAY2RGB);
+    saveXYZ("pointcloud.xyz", xyz);
+    print("floatDisp", floatDisp);
+
 }
