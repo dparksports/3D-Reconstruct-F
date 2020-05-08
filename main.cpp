@@ -150,8 +150,12 @@ int main() {
         pointsTranslateB.emplace_back(keypoints2[match.trainIdx].pt);
     }
 
-    cv::Mat matrixF = cv::findFundamentalMat(pointsTranslateA, pointsTranslateB,
-            FM_RANSAC, 3, 0.99);
+//    cv::Mat matrixF = cv::findFundamentalMat(pointsTranslateA, pointsTranslateB,
+//            FM_RANSAC, 3, 0.99);
+
+    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints,
+                                             FM_RANSAC, 3, 0.99);
+
 //    std::vector<uint8_t> inliersMask(goodMatches.size());
 //    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints, inliersMask);
 //    cv::Mat matrixF = cv::findFundamentalMat(sourceKeypoints, destinationKeypoints, FM_8POINT);
@@ -217,9 +221,9 @@ int main() {
     Mat xyz;
     Mat floatDisp;
     disp.convertTo(floatDisp, CV_32F, 1.0f / disparity_multiplier);
-    reprojectImageTo3D(, xyz, Q, true);
+    reprojectImageTo3D(floatDisp, xyz, Q, true);
 //    cv::cvtColor(img1, img1, cv::COLOR_GRAY2RGB);
     saveXYZ("pointcloud.xyz", xyz);
-    print("floatDisp", floatDisp);
+    print("Q", Q);
 
 }
