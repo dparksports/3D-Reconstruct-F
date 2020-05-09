@@ -1,4 +1,4 @@
-# 3D Reconstruction with F and K or Q.
+# 3D Reconstruction with F and Q
 
 
 Optical Left |  Optical Right
